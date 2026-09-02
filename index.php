@@ -122,14 +122,16 @@ if ($conn && isset($_POST['registrar_venta'])) {
         .menu-card {
             background: #fff;
             cursor: pointer;
-            transition: transform 0.2s;
+            transition: transform 0.2s, background-color 0.2s;
+            user-select: none;
         }
         .menu-card:hover {
             transform: scale(1.03);
         }
         .menu-card.selected {
-            background-color: #ffe699;
+            background-color: #ffe699 !important;
             border-color: #ff4500 !important;
+            box-shadow: 6px 6px 0px #ff4500 !important;
         }
         .ticket-box {
             background: #fff8dc;
@@ -147,7 +149,7 @@ if ($conn && isset($_POST['registrar_venta'])) {
         <div class="card border-cartoon p-4 text-center bg-warning" style="max-width: 420px; width: 100%;">
             <div class="mb-3">
                 <span class="display-1">🍗</span>
-                <h2 class="fw-bold mt-2 text-danger text-stroke">POLLOS CANDELARIA</h2>
+                <h2 class="fw-bold mt-2 text-danger">POLLOS CANDELARIA</h2>
                 <p class="fw-bold text-dark">¡Inicia sesión para atender!</p>
             </div>
 
@@ -199,7 +201,7 @@ if ($conn && isset($_POST['registrar_venta'])) {
         <?= $mensaje_venta ?>
 
         <div class="row g-4">
-            <!-- COLUMNA IZQUIERDA: MENÚ DE PLATOS (CLIC PARA ELEGIR) -->
+            <!-- COLUMNA IZQUIERDA: MENÚ DE PLATOS -->
             <div class="col-lg-7">
                 <div class="card border-cartoon p-4 bg-white">
                     <h4 class="fw-bold text-danger mb-3">
@@ -208,10 +210,9 @@ if ($conn && isset($_POST['registrar_venta'])) {
                     
                     <div class="row row-cols-1 row-cols-md-2 g-3">
                         <?php
-                        // Lista de fotos caricaturescas de respaldo por tipo
                         $fotos = [
-                            '1' => 'https://cdn-icons-png.flaticon.com/512/3075/3075977.png', // Pollo
-                            '2' => 'https://cdn-icons-png.flaticon.com/512/1046/1046784.png', // Pipocas / Nuggets
+                            '1' => 'https://cdn-icons-png.flaticon.com/512/3075/3075977.png',
+                            '2' => 'https://cdn-icons-png.flaticon.com/512/1046/1046784.png',
                             'default' => 'https://cdn-icons-png.flaticon.com/512/3170/3170733.png'
                         ];
 
@@ -221,8 +222,10 @@ if ($conn && isset($_POST['registrar_venta'])) {
                         ?>
                             <div class="col">
                                 <div class="card border-cartoon menu-card p-3 text-center" 
-                                     onclick="seleccionarProducto(<?= $p['id_producto'] ?>, '<?= addslashes($p['nombre']) ?>', <?= $p['precio'] ?>, this)">
-                                    <img src="<?= $img ?>" style="height: 100px; object-fit: contain;" class="mx-auto mb-2" alt="Plato">
+                                     data-id="<?= $p['id_producto'] ?>" 
+                                     data-nombre="<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>" 
+                                     data-precio="<?= $p['precio'] ?>">
+                                    <img src="<?= $img ?>" style="height: 100px; object-fit: contain;" class="mx-auto mb-2 pointer-events-none" alt="Plato">
                                     <h5 class="fw-bold m-0 text-dark"><?= htmlspecialchars($p['nombre']) ?></h5>
                                     <span class="badge bg-danger fs-6 border-cartoon mt-2">Bs. <?= number_format($p['precio'], 2) ?></span>
                                 </div>
@@ -244,12 +247,12 @@ if ($conn && isset($_POST['registrar_venta'])) {
                         
                         <div class="mb-3">
                             <label class="fw-bold">Nombre del Cliente:</label>
-                            <input type="text" name="cliente" id="cliente_input" class="form-control border-cartoon fw-bold" placeholder="Ej. Pedro Picapiedra" oninput="actualizarTicket()" required>
+                            <input type="text" name="cliente" id="cliente_input" class="form-control border-cartoon fw-bold" placeholder="Ej. Pedro Picapiedra" required>
                         </div>
 
                         <div class="mb-3">
                             <label class="fw-bold">Cantidad:</label>
-                            <input type="number" name="cantidad" id="cantidad_input" class="form-control border-cartoon fw-bold" value="1" min="1" onchange="actualizarTicket()" onkeyup="actualizarTicket()" required>
+                            <input type="number" name="cantidad" id="cantidad_input" class="form-control border-cartoon fw-bold" value="1" min="1" required>
                         </div>
 
                         <!-- TICKET DE VISTA PREVIA -->
@@ -352,42 +355,62 @@ if ($conn && isset($_POST['registrar_venta'])) {
 <?php endif; ?>
 
 <script>
-let productoSeleccionado = null;
-
-function seleccionarProducto(id, nombre, precio, elemento) {
-    // Desmarcar anteriores
-    document.querySelectorAll('.menu-card').forEach(card => card.classList.remove('selected'));
-    
-    // Marcar seleccionado
-    elemento.classList.add('selected');
-    
-    // Guardar datos
-    productoSeleccionado = { id, nombre, precio };
-    document.getElementById('id_producto').value = id;
-    
-    actualizarTicket();
-}
-
-function actualizarTicket() {
-    const cliente = document.getElementById('cliente_input').value.trim();
-    const cantidad = parseInt(document.getElementById('cantidad_input').value) || 1;
+document.addEventListener('DOMContentLoaded', () => {
+    let productoSeleccionado = null;
+    const clienteInput = document.getElementById('cliente_input');
+    const cantidadInput = document.getElementById('cantidad_input');
     const btnConfirmar = document.getElementById('btn_confirmar');
 
-    if (cliente !== "" && productoSeleccionado !== null) {
-        document.getElementById('ticket_cliente').innerText = cliente;
-        document.getElementById('ticket_plato').innerText = productoSeleccionado.nombre;
-        document.getElementById('ticket_precio').innerText = "Bs. " + productoSeleccionado.precio.toFixed(2);
-        document.getElementById('ticket_cantidad').innerText = cantidad;
-        
-        const total = productoSeleccionado.precio * cantidad;
-        document.getElementById('ticket_total').innerText = "Bs. " + total.toFixed(2);
-        
-        btnConfirmar.disabled = false;
-    } else {
-        if (cliente !== "") document.getElementById('ticket_cliente').innerText = cliente;
-        btnConfirmar.disabled = true;
+    // Manejador de clics en las tarjetas del menú
+    document.querySelectorAll('.menu-card').forEach(card => {
+        card.addEventListener('click', function() {
+            document.querySelectorAll('.menu-card').forEach(c => c.classList.remove('selected'));
+            this.classList.add('selected');
+
+            productoSeleccionado = {
+                id: this.dataset.id,
+                nombre: this.dataset.nombre,
+                precio: parseFloat(this.dataset.precio)
+            };
+
+            document.getElementById('id_producto').value = productoSeleccionado.id;
+            actualizarTicket();
+        });
+    });
+
+    // Escuchar cambios en los inputs
+    if (clienteInput && cantidadInput) {
+        clienteInput.addEventListener('input', actualizarTicket);
+        cantidadInput.addEventListener('input', actualizarTicket);
     }
-}
+
+    function actualizarTicket() {
+        const cliente = clienteInput.value.trim();
+        const cantidad = parseInt(cantidadInput.value) || 1;
+
+        if (cliente !== "") {
+            document.getElementById('ticket_cliente').innerText = cliente;
+        } else {
+            document.getElementById('ticket_cliente').innerText = "---";
+        }
+
+        if (productoSeleccionado !== null) {
+            document.getElementById('ticket_plato').innerText = productoSeleccionado.nombre;
+            document.getElementById('ticket_precio').innerText = "Bs. " + productoSeleccionado.precio.toFixed(2);
+            document.getElementById('ticket_cantidad').innerText = cantidad;
+
+            const total = productoSeleccionado.precio * cantidad;
+            document.getElementById('ticket_total').innerText = "Bs. " + total.toFixed(2);
+        }
+
+        // Habilitar botón solo si hay cliente y producto seleccionado
+        if (cliente !== "" && productoSeleccionado !== null && cantidad > 0) {
+            btnConfirmar.disabled = false;
+        } else {
+            btnConfirmar.disabled = true;
+        }
+    }
+});
 </script>
 
 </body>
