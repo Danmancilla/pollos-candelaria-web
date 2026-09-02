@@ -1,326 +1,394 @@
 <?php
 session_start();
 
-// Manejo de Cierre de Sesión
+$db_user = $_SESSION['db_user'] ?? null;
+$db_pass = $_SESSION['db_pass'] ?? null;
+$db_host = 'localhost';
+$db_name = 'pollos_candelaria';
+
+$conn = null;
+$error_login = '';
+
+// Login
+if (isset($_POST['login'])) {
+    $user_input = $_POST['usuario'];
+    $pass_input = $_POST['password'];
+
+    try {
+        $conn_test = new PDO("mysql:host=$db_host;dbname=$db_name;charset=utf8", $user_input, $pass_input);
+        $_SESSION['db_user'] = $user_input;
+        $_SESSION['db_pass'] = $pass_input;
+        header("Location: index.php");
+        exit;
+    } catch (PDOException $e) {
+        $error_login = "¡Uy! Credenciales incorrectas o acceso denegado.";
+    }
+}
+
+// Logout
 if (isset($_GET['logout'])) {
     session_destroy();
     header("Location: index.php");
-    exit();
+    exit;
 }
 
-$error = "";
-$mensaje = "";
-
-// Proceso de Login
-if (isset($_POST['login'])) {
-    $user = $_POST['usuario'];
-    $pass = $_POST['password'];
-
-    // Credenciales de la BD según el rol seleccionado
-    $db_user = "";
-    $db_pass = "";
-
-    if ($user === "caja1") {
-        $db_user = "caja1";
-        $db_pass = "Caja1Pass123!";
-    } elseif ($user === "caja2") {
-        $db_user = "caja2";
-        $db_pass = "Caja2Pass123!";
-    } elseif ($user === "admin") {
-        $db_user = "admin_candelaria";
-        $db_pass = "AdminPass123!";
-    }
-
-    if ($pass === $db_pass && $db_user !== "") {
-        $_SESSION['usuario'] = $user;
-        $_SESSION['db_user'] = $db_user;
-        $_SESSION['db_pass'] = $db_pass;
-    } else {
-        $error = "Contraseña incorrecta para el usuario seleccionado.";
+// Conexión
+if ($db_user && $db_pass) {
+    try {
+        $conn = new PDO("mysql:host=$db_host;dbname=$db_name;charset=utf8", $db_user, $db_pass);
+        $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    } catch (PDOException $e) {
+        session_destroy();
+        header("Location: index.php");
+        exit;
     }
 }
 
-// Conexión a MySQL si hay sesión activa
-$conn = null;
-if (isset($_SESSION['usuario'])) {
-    $conn = new mysqli("localhost", $_SESSION['db_user'], $_SESSION['db_pass'], "pollos_candelaria");
-    if ($conn->connect_error) {
-        $error = "Error al conectar con la Base de Datos: " . $conn->connect_error;
-    }
-}
-
-// Procesar Registro de Venta (Cajas y Admin)
+// Registro de Venta
+$mensaje_venta = '';
 if ($conn && isset($_POST['registrar_venta'])) {
-    $cliente = $conn->real_escape_string($_POST['cliente']);
-    $total = floatval($_POST['total']);
-    $caja = ($_SESSION['usuario'] === 'admin') ? 'Caja Admin' : ucfirst($_SESSION['usuario']);
+    $id_producto = $_POST['id_producto'];
+    $cantidad = (int)$_POST['cantidad'];
+    $cliente = trim($_POST['cliente']);
 
-    $sql = "INSERT INTO pedidos (caja_origen, cliente, total) VALUES ('$caja', '$cliente', $total)";
-    if ($conn->query($sql) === TRUE) {
-        $mensaje = "¡Venta registrada exitosamente!";
-    } else {
-        $error = "Error de permisos o ejecución: " . $conn->error;
+    try {
+        $stmt_prod = $conn->prepare("SELECT nombre, precio FROM productos WHERE id_producto = ?");
+        $stmt_prod->execute([$id_producto]);
+        $prod = $stmt_prod->fetch(PDO::FETCH_ASSOC);
+
+        if ($prod && $cantidad > 0) {
+            $total = $prod['precio'] * $cantidad;
+            $nombre_cliente = $cliente ?: 'Cliente General';
+
+            $conn->beginTransaction();
+            $stmt_ped = $conn->prepare("INSERT INTO pedidos (cliente, total, usuario_registro) VALUES (?, ?, ?)");
+            $stmt_ped->execute([$nombre_cliente, $total, $db_user]);
+            $id_pedido = $conn->lastInsertId();
+
+            $stmt_det = $conn->prepare("INSERT INTO detalle_pedido (id_pedido, id_producto, cantidad, precio_unitario) VALUES (?, ?, ?, ?)");
+            $stmt_det->execute([$id_pedido, $id_producto, $cantidad, $prod['precio']]);
+
+            $conn->commit();
+            $mensaje_venta = "
+            <div class='alert-cartoon text-center mb-4'>
+                <h4 class='fw-black text-success m-0'>🎉 ¡PEDIDO #$id_pedido REGISTRADO!</h4>
+                <p class='m-0 mt-1 fs-5'><b>Cliente:</b> $nombre_cliente | <b>Plato:</b> {$prod['nombre']} (x$cantidad) | <b>Total:</b> Bs. ".number_format($total, 2)."</p>
+            </div>";
+        }
+    } catch (Exception $e) {
+        if ($conn->inTransaction()) $conn->rollBack();
+        $mensaje_venta = "<div class='alert alert-danger fw-bold border-cartoon mb-4'>Error al registrar: " . htmlspecialchars($e->getMessage()) . "</div>";
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pollos Candelaria - Sistema POS</title>
+    <title>Pollos Candelaria - POS Fun</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
     <style>
-        :root {
-            --primary: #8b0000;
-            --primary-hover: #a00000;
-            --accent: #ffb703;
-            --bg: #f8f9fa;
-            --card-bg: #ffffff;
-            --text: #2b2b2b;
-        }
-
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            margin: 0;
-            padding: 0;
+            font-family: 'Fredoka', cursive, sans-serif;
+            background-color: #fff6e5;
+            color: #2b2b2b;
         }
-
-        header {
-            background-color: var(--primary);
-            color: white;
-            padding: 2rem 1rem;
-            text-align: center;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        .border-cartoon {
+            border: 3px solid #000 !important;
+            box-shadow: 4px 4px 0px #000;
+            border-radius: 16px;
         }
-
-        header h1 {
-            margin: 0;
-            font-size: 2.5rem;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-        }
-
-        header p {
-            margin: 5px 0 0 0;
-            color: var(--accent);
-            font-weight: 500;
-        }
-
-        .container {
-            max-width: 900px;
-            margin: 30px auto;
-            padding: 0 20px;
-        }
-
-        .card {
-            background: var(--card-bg);
+        .btn-cartoon {
+            border: 3px solid #000;
+            box-shadow: 3px 3px 0px #000;
+            font-weight: 700;
             border-radius: 12px;
-            padding: 30px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-            margin-bottom: 25px;
+            transition: all 0.1s ease;
         }
-
-        .alert {
-            padding: 12px 15px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            font-weight: 500;
+        .btn-cartoon:active {
+            transform: translate(2px, 2px);
+            box-shadow: 1px 1px 0px #000;
         }
-
-        .alert-error { background-color: #ffe6e6; color: #d90429; border: 1px solid #ffb3b3; }
-        .alert-success { background-color: #e6ffe6; color: #2b9348; border: 1px solid #b3ffb3; }
-
-        form label {
-            display: block;
-            margin-top: 15px;
-            font-weight: 600;
+        .alert-cartoon {
+            background-color: #a8ffb2;
+            border: 3px solid #000;
+            box-shadow: 4px 4px 0px #000;
+            border-radius: 16px;
+            padding: 15px;
         }
-
-        form input, form select {
-            width: 100%;
-            padding: 12px;
-            margin-top: 6px;
-            border: 1px solid #ccc;
-            border-radius: 6px;
-            box-sizing: border-box;
-            font-size: 1rem;
-        }
-
-        .btn {
-            background-color: var(--primary);
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            margin-top: 20px;
-            border-radius: 6px;
-            font-size: 1rem;
-            font-weight: bold;
+        .menu-card {
+            background: #fff;
             cursor: pointer;
-            width: 100%;
-            transition: background 0.2s;
+            transition: transform 0.2s;
         }
-
-        .btn:hover { background-color: var(--primary-hover); }
-
-        .user-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid #eee;
-            padding-bottom: 15px;
-            margin-bottom: 20px;
+        .menu-card:hover {
+            transform: scale(1.03);
         }
-
-        .user-badge {
-            background: #eee;
-            padding: 6px 14px;
-            border-radius: 20px;
-            font-weight: bold;
-            text-transform: uppercase;
-            font-size: 0.85rem;
+        .menu-card.selected {
+            background-color: #ffe699;
+            border-color: #ff4500 !important;
         }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
+        .ticket-box {
+            background: #fff8dc;
+            border: 2px dashed #000;
+            border-radius: 12px;
+            padding: 15px;
         }
-
-        th, td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #eee;
-        }
-
-        th { background-color: #f1f1f1; font-weight: 600; }
-        .logout-link { color: #d90429; text-decoration: none; font-weight: 600; }
     </style>
 </head>
 <body>
 
-<header>
-    <h1>🍗 Pollos Candelaria</h1>
-    <p>Sistema de Gestión & Punto de Venta</p>
-</header>
+<?php if (!$conn): ?>
+    <!-- LOGIN CARICATURESCO -->
+    <div class="container d-flex justify-content-center align-items-center vh-100">
+        <div class="card border-cartoon p-4 text-center bg-warning" style="max-width: 420px; width: 100%;">
+            <div class="mb-3">
+                <span class="display-1">🍗</span>
+                <h2 class="fw-bold mt-2 text-danger text-stroke">POLLOS CANDELARIA</h2>
+                <p class="fw-bold text-dark">¡Inicia sesión para atender!</p>
+            </div>
 
-<div class="container">
-
-    <?php if (!isset($_SESSION['usuario'])): ?>
-        <!-- PANTALLA DE INICIO DE SESIÓN -->
-        <div class="card" style="max-width: 400px; margin: 0 auto;">
-            <h2 style="text-align: center; margin-top: 0;">Iniciar Sesión</h2>
-            
-            <?php if ($error): ?>
-                <div class="alert alert-error"><?= $error ?></div>
+            <?php if ($error_login): ?>
+                <div class="alert alert-danger border-cartoon py-2 fw-bold"><?= $error_login ?></div>
             <?php endif; ?>
 
-            <form method="POST" action="">
-                <label>Seleccionar Usuario:</label>
-                <select name="usuario" required>
-                    <option value="caja1">Caja 1</option>
-                    <option value="caja2">Caja 2</option>
-                    <option value="admin">Administrador</option>
-                </select>
-
-                <label>Contraseña:</label>
-                <input type="password" name="password" required placeholder="••••••••">
-
-                <button type="submit" name="login" class="btn">Ingresar al Sistema</button>
-            </form>
-        </div>
-
-    <?php else: ?>
-        <!-- PANTALLA PRINCIPAL CON SESIÓN INICIADA -->
-        <div class="card">
-            <div class="user-bar">
-                <div>
-                    Sesión activa: <span class="user-badge"><?= $_SESSION['usuario'] ?></span>
+            <form method="POST">
+                <div class="mb-3 text-start">
+                    <label class="fw-bold mb-1">Usuario:</label>
+                    <select class="form-select border-cartoon fw-bold" name="usuario" required>
+                        <option value="caja1">🥤 Caja 1</option>
+                        <option value="caja2">🍟 Caja 2</option>
+                        <option value="admin_candelaria">👑 Administrador</option>
+                    </select>
                 </div>
-                <a href="index.php?logout=1" class="logout-link">Cerrar Sesión ➔</a>
-            </div>
 
-            <?php if ($error): ?><div class="alert alert-error"><?= $error ?></div><?php endif; ?>
-            <?php if ($mensaje): ?><div class="alert alert-success"><?= $mensaje ?></div><?php endif; ?>
+                <div class="mb-4 text-start">
+                    <label class="fw-bold mb-1">Contraseña:</label>
+                    <input type="password" class="form-control border-cartoon fw-bold" name="password" placeholder="***" required>
+                </div>
 
-            <!-- MÓDULO DE VENTAS (Disponible para Cajas y Admin) -->
-            <h3>🛒 Registrar Nueva Venta</h3>
-            <form method="POST" action="">
-                <label>Nombre del Cliente:</label>
-                <input type="text" name="cliente" required placeholder="Ej. Pedro Gómez">
-
-                <label>Monto Total (Bs.):</label>
-                <input type="number" step="0.01" name="total" required placeholder="Ej. 65.00">
-
-                <button type="submit" name="registrar_venta" class="btn">Confirmar Pedido</button>
+                <button type="submit" name="login" class="btn btn-danger btn-cartoon w-100 py-2 fs-5">
+                    ¡ENTRAR A TRABAJAR! 🚀
+                </button>
             </form>
         </div>
+    </div>
 
-        <!-- MÓDULO DEL ADMINISTRADOR (Exclusivo para la cuenta 'admin') -->
-        <?php if ($_SESSION['usuario'] === 'admin'): ?>
-            <div class="card">
-                <h3 style="color: var(--primary);">📊 Reporte General de Ventas (Solo Administrador)</h3>
-                <?php
-                $resumen = $conn->query("SELECT * FROM resumen_ventas_admin");
-                if ($resumen && $resumen->num_rows > 0):
-                ?>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Fecha</th>
-                                <th>Caja de Origen</th>
-                                <th>Total Pedidos</th>
-                                <th>Ingresos (Bs.)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php while ($row = $resumen->fetch_assoc()): ?>
-                                <tr>
-                                    <td><?= $row['fecha'] ?></td>
-                                    <td><?= $row['caja_origen'] ?></td>
-                                    <td><?= $row['total_pedidos'] ?></td>
-                                    <td><strong><?= number_format($row['ingresos_totales'], 2) ?> Bs.</strong></td>
-                                </tr>
-                            <?php endwhile; ?>
-                        </tbody>
-                    </table>
-                <?php else: ?>
-                    <p>No se encontraron registros de ventas acumuladas.</p>
-                <?php endif; ?>
+<?php else: ?>
+    <!-- PANEL PRINCIPAL -->
+    <nav class="navbar bg-danger border-bottom border-cartoon sticky-top py-2 mb-4">
+        <div class="container">
+            <span class="navbar-brand fw-bold text-white fs-3">
+                🍗 POLLOS CANDELARIA POS
+            </span>
+            <div class="d-flex align-items-center">
+                <span class="badge bg-warning text-dark border-cartoon fs-6 me-3 p-2">
+                    👤 <?= htmlspecialchars($db_user) ?>
+                </span>
+                <a href="?logout=1" class="btn btn-light btn-cartoon btn-sm">
+                    Salir 🏃
+                </a>
             </div>
-        <?php endif; ?>
+        </div>
+    </nav>
 
-        <!-- MÓDULO DE MENÚ / CONSULTA (Disponible para todos) -->
-        <div class="card">
-            <h3>📋 Menú de Productos</h3>
-            <?php
-            $productos = $conn->query("SELECT * FROM productos");
-            if ($productos && $productos->num_rows > 0):
-            ?>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Producto</th>
-                            <th>Precio</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php while ($prod = $productos->fetch_assoc()): ?>
-                            <tr>
-                                <td><?= htmlspecialchars($prod['nombre']) ?></td>
-                                <td><strong><?= number_format($prod['precio'], 2) ?> Bs.</strong></td>
-                            </tr>
-                        <?php endwhile; ?>
-                    </tbody>
-                </table>
-            <?php endif; ?>
+    <div class="container pb-5">
+        <?= $mensaje_venta ?>
+
+        <div class="row g-4">
+            <!-- COLUMNA IZQUIERDA: MENÚ DE PLATOS (CLIC PARA ELEGIR) -->
+            <div class="col-lg-7">
+                <div class="card border-cartoon p-4 bg-white">
+                    <h4 class="fw-bold text-danger mb-3">
+                        📋 1. Selecciona el Plato del Menú
+                    </h4>
+                    
+                    <div class="row row-cols-1 row-cols-md-2 g-3">
+                        <?php
+                        // Lista de fotos caricaturescas de respaldo por tipo
+                        $fotos = [
+                            '1' => 'https://cdn-icons-png.flaticon.com/512/3075/3075977.png', // Pollo
+                            '2' => 'https://cdn-icons-png.flaticon.com/512/1046/1046784.png', // Pipocas / Nuggets
+                            'default' => 'https://cdn-icons-png.flaticon.com/512/3170/3170733.png'
+                        ];
+
+                        $prods = $conn->query("SELECT * FROM productos")->fetchAll(PDO::FETCH_ASSOC);
+                        foreach ($prods as $p):
+                            $img = $fotos[$p['id_producto']] ?? $fotos['default'];
+                        ?>
+                            <div class="col">
+                                <div class="card border-cartoon menu-card p-3 text-center" 
+                                     onclick="seleccionarProducto(<?= $p['id_producto'] ?>, '<?= addslashes($p['nombre']) ?>', <?= $p['precio'] ?>, this)">
+                                    <img src="<?= $img ?>" style="height: 100px; object-fit: contain;" class="mx-auto mb-2" alt="Plato">
+                                    <h5 class="fw-bold m-0 text-dark"><?= htmlspecialchars($p['nombre']) ?></h5>
+                                    <span class="badge bg-danger fs-6 border-cartoon mt-2">Bs. <?= number_format($p['precio'], 2) ?></span>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+
+            <!-- COLUMNA DERECHA: RECIBO / CONFIRMACIÓN -->
+            <div class="col-lg-5">
+                <div class="card border-cartoon p-4 bg-warning">
+                    <h4 class="fw-bold text-dark mb-3">
+                        🛒 2. Detalle del Pedido
+                    </h4>
+
+                    <form method="POST">
+                        <input type="hidden" name="id_producto" id="id_producto" required>
+                        
+                        <div class="mb-3">
+                            <label class="fw-bold">Nombre del Cliente:</label>
+                            <input type="text" name="cliente" id="cliente_input" class="form-control border-cartoon fw-bold" placeholder="Ej. Pedro Picapiedra" oninput="actualizarTicket()" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="fw-bold">Cantidad:</label>
+                            <input type="number" name="cantidad" id="cantidad_input" class="form-control border-cartoon fw-bold" value="1" min="1" onchange="actualizarTicket()" onkeyup="actualizarTicket()" required>
+                        </div>
+
+                        <!-- TICKET DE VISTA PREVIA -->
+                        <div class="ticket-box mb-3 text-dark">
+                            <h5 class="fw-bold text-center border-bottom border-dark pb-2 mb-2">🧾 TICKET DE COMPRA</h5>
+                            <p class="m-0"><b>Cliente:</b> <span id="ticket_cliente" class="text-primary">---</span></p>
+                            <p class="m-0"><b>Plato:</b> <span id="ticket_plato" class="text-danger">Selecciona un plato</span></p>
+                            <p class="m-0"><b>Precio Unitario:</b> <span id="ticket_precio">Bs. 0.00</span></p>
+                            <p class="m-0"><b>Cantidad:</b> <span id="ticket_cantidad">1</span></p>
+                            <hr class="my-2 border-dark">
+                            <h4 class="fw-bold text-end m-0">TOTAL: <span id="ticket_total" class="text-success">Bs. 0.00</span></h4>
+                        </div>
+
+                        <button type="submit" name="registrar_venta" id="btn_confirmar" class="btn btn-success btn-cartoon w-100 py-3 fs-4" disabled>
+                            ¡CONFIRMAR VENTA! 🔥
+                        </button>
+                    </form>
+                </div>
+            </div>
         </div>
 
-    <?php endif; ?>
+        <!-- SECCIÓN DE REPORTES -->
+        <div class="row mt-4 g-4">
+            <?php if ($db_user === 'admin_candelaria'): ?>
+                <!-- REPORTE GENERAL ADMIN -->
+                <div class="col-12">
+                    <div class="card border-cartoon p-4 bg-white">
+                        <h4 class="fw-bold text-danger mb-3">📊 Reporte General de Ventas (Vista Administrador)</h4>
+                        <div class="table-responsive">
+                            <table class="table table-bordered align-middle text-center border-cartoon">
+                                <thead class="table-warning border-cartoon">
+                                    <tr>
+                                        <th>Cajero</th>
+                                        <th>Total Pedidos</th>
+                                        <th>Total Recaudado</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="fw-bold">
+                                    <?php
+                                    try {
+                                        $resumen = $conn->query("SELECT * FROM resumen_ventas_admin")->fetchAll(PDO::FETCH_ASSOC);
+                                        foreach ($resumen as $r) {
+                                            echo "<tr>
+                                                <td><span class='badge bg-danger border-cartoon fs-6'>{$r['usuario_registro']}</span></td>
+                                                <td>{$r['total_pedidos']} pedido(s)</td>
+                                                <td class='text-success fs-5'>Bs. ".number_format($r['total_recaudado'], 2)."</td>
+                                            </tr>";
+                                        }
+                                    } catch (Exception $e) {
+                                        echo "<tr><td colspan='3' class='text-danger'>Sin acceso al reporte general.</td></tr>";
+                                    }
+                                    ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
 
-</div>
+            <!-- HISTORIAL DE ULTIMOS PEDIDOS -->
+            <div class="col-12">
+                <div class="card border-cartoon p-4 bg-white">
+                    <h4 class="fw-bold text-dark mb-3">🕒 Últimos Pedidos Registrados</h4>
+                    <div class="table-responsive">
+                        <table class="table table-hover text-center align-middle border-cartoon">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th># Pedido</th>
+                                    <th>Cliente</th>
+                                    <th>Total Pagado</th>
+                                    <th>Atendido Por</th>
+                                    <th>Fecha y Hora</th>
+                                </tr>
+                            </thead>
+                            <tbody class="fw-bold">
+                                <?php
+                                try {
+                                    $pedidos = $conn->query("SELECT * FROM pedidos ORDER BY id_pedido DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
+                                    foreach ($pedidos as $ped) {
+                                        echo "<tr>
+                                            <td><span class='badge bg-warning text-dark border-cartoon'>#{$ped['id_pedido']}</span></td>
+                                            <td class='text-start ps-4'>".htmlspecialchars($ped['cliente'])."</td>
+                                            <td class='text-success fs-6'>Bs. ".number_format($ped['total'], 2)."</td>
+                                            <td>{$ped['usuario_registro']}</td>
+                                            <td class='text-muted fs-7'>{$ped['fecha']}</td>
+                                        </tr>";
+                                    }
+                                } catch (Exception $e) {
+                                    echo "<tr><td colspan='5' class='text-muted'>No hay pedidos registrados aún.</td></tr>";
+                                }
+                                ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<?php endif; ?>
+
+<script>
+let productoSeleccionado = null;
+
+function seleccionarProducto(id, nombre, precio, elemento) {
+    // Desmarcar anteriores
+    document.querySelectorAll('.menu-card').forEach(card => card.classList.remove('selected'));
+    
+    // Marcar seleccionado
+    elemento.classList.add('selected');
+    
+    // Guardar datos
+    productoSeleccionado = { id, nombre, precio };
+    document.getElementById('id_producto').value = id;
+    
+    actualizarTicket();
+}
+
+function actualizarTicket() {
+    const cliente = document.getElementById('cliente_input').value.trim();
+    const cantidad = parseInt(document.getElementById('cantidad_input').value) || 1;
+    const btnConfirmar = document.getElementById('btn_confirmar');
+
+    if (cliente !== "" && productoSeleccionado !== null) {
+        document.getElementById('ticket_cliente').innerText = cliente;
+        document.getElementById('ticket_plato').innerText = productoSeleccionado.nombre;
+        document.getElementById('ticket_precio').innerText = "Bs. " + productoSeleccionado.precio.toFixed(2);
+        document.getElementById('ticket_cantidad').innerText = cantidad;
+        
+        const total = productoSeleccionado.precio * cantidad;
+        document.getElementById('ticket_total').innerText = "Bs. " + total.toFixed(2);
+        
+        btnConfirmar.disabled = false;
+    } else {
+        if (cliente !== "") document.getElementById('ticket_cliente').innerText = cliente;
+        btnConfirmar.disabled = true;
+    }
+}
+</script>
 
 </body>
 </html>
