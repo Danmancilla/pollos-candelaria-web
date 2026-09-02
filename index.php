@@ -52,6 +52,7 @@ if ($conn && isset($_POST['registrar_venta'])) {
     $cliente = trim($_POST['cliente']);
 
     try {
+        // Consulta usando id_producto correctamente
         $stmt_prod = $conn->prepare("SELECT nombre, precio FROM productos WHERE id_producto = ?");
         $stmt_prod->execute([$id_producto]);
         $prod = $stmt_prod->fetch(PDO::FETCH_ASSOC);
@@ -144,7 +145,7 @@ if ($conn && isset($_POST['registrar_venta'])) {
 <body>
 
 <?php if (!$conn): ?>
-    <!-- LOGIN CARICATURESCO -->
+    <!-- LOGIN -->
     <div class="container d-flex justify-content-center align-items-center vh-100">
         <div class="card border-cartoon p-4 text-center bg-warning" style="max-width: 420px; width: 100%;">
             <div class="mb-3">
@@ -201,7 +202,7 @@ if ($conn && isset($_POST['registrar_venta'])) {
         <?= $mensaje_venta ?>
 
         <div class="row g-4">
-            <!-- COLUMNA IZQUIERDA: MENÚ DE PLATOS -->
+            <!-- MENÚ DE PLATOS -->
             <div class="col-lg-7">
                 <div class="card border-cartoon p-4 bg-white">
                     <h4 class="fw-bold text-danger mb-3">
@@ -218,11 +219,12 @@ if ($conn && isset($_POST['registrar_venta'])) {
 
                         $prods = $conn->query("SELECT * FROM productos")->fetchAll(PDO::FETCH_ASSOC);
                         foreach ($prods as $p):
-                            $img = $fotos[$p['id_producto']] ?? $fotos['default'];
+                            $id_p = $p['id_producto'];
+                            $img = $fotos[$id_p] ?? $fotos['default'];
                         ?>
                             <div class="col">
                                 <div class="card border-cartoon menu-card p-3 text-center" 
-                                     data-id="<?= $p['id_producto'] ?>" 
+                                     data-id="<?= $id_p ?>" 
                                      data-nombre="<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>" 
                                      data-precio="<?= $p['precio'] ?>">
                                     <img src="<?= $img ?>" style="height: 100px; object-fit: contain;" class="mx-auto mb-2 pointer-events-none" alt="Plato">
@@ -235,7 +237,7 @@ if ($conn && isset($_POST['registrar_venta'])) {
                 </div>
             </div>
 
-            <!-- COLUMNA DERECHA: RECIBO / CONFIRMACIÓN -->
+            <!-- DETALLE DEL PEDIDO -->
             <div class="col-lg-5">
                 <div class="card border-cartoon p-4 bg-warning">
                     <h4 class="fw-bold text-dark mb-3">
@@ -255,7 +257,7 @@ if ($conn && isset($_POST['registrar_venta'])) {
                             <input type="number" name="cantidad" id="cantidad_input" class="form-control border-cartoon fw-bold" value="1" min="1" required>
                         </div>
 
-                        <!-- TICKET DE VISTA PREVIA -->
+                        <!-- TICKET DE COMPRA -->
                         <div class="ticket-box mb-3 text-dark">
                             <h5 class="fw-bold text-center border-bottom border-dark pb-2 mb-2">🧾 TICKET DE COMPRA</h5>
                             <p class="m-0"><b>Cliente:</b> <span id="ticket_cliente" class="text-primary">---</span></p>
@@ -274,10 +276,9 @@ if ($conn && isset($_POST['registrar_venta'])) {
             </div>
         </div>
 
-        <!-- SECCIÓN DE REPORTES -->
+        <!-- REPORTES Y PEDIDOS -->
         <div class="row mt-4 g-4">
             <?php if ($db_user === 'admin_candelaria'): ?>
-                <!-- REPORTE GENERAL ADMIN -->
                 <div class="col-12">
                     <div class="card border-cartoon p-4 bg-white">
                         <h4 class="fw-bold text-danger mb-3">📊 Reporte General de Ventas (Vista Administrador)</h4>
@@ -295,10 +296,13 @@ if ($conn && isset($_POST['registrar_venta'])) {
                                     try {
                                         $resumen = $conn->query("SELECT * FROM resumen_ventas_admin")->fetchAll(PDO::FETCH_ASSOC);
                                         foreach ($resumen as $r) {
+                                            $cajero = $r['usuario_registro'] ?? $r['cajero'] ?? 'Desconocido';
+                                            $total_ped = $r['total_pedidos'] ?? $r['pedidos'] ?? 0;
+                                            $recaudado = $r['total_recaudado'] ?? $r['total'] ?? 0;
                                             echo "<tr>
-                                                <td><span class='badge bg-danger border-cartoon fs-6'>{$r['usuario_registro']}</span></td>
-                                                <td>{$r['total_pedidos']} pedido(s)</td>
-                                                <td class='text-success fs-5'>Bs. ".number_format($r['total_recaudado'], 2)."</td>
+                                                <td><span class='badge bg-danger border-cartoon fs-6'>{$cajero}</span></td>
+                                                <td>{$total_ped} pedido(s)</td>
+                                                <td class='text-success fs-5'>Bs. ".number_format($recaudado, 2)."</td>
                                             </tr>";
                                         }
                                     } catch (Exception $e) {
@@ -312,7 +316,6 @@ if ($conn && isset($_POST['registrar_venta'])) {
                 </div>
             <?php endif; ?>
 
-            <!-- HISTORIAL DE ULTIMOS PEDIDOS -->
             <div class="col-12">
                 <div class="card border-cartoon p-4 bg-white">
                     <h4 class="fw-bold text-dark mb-3">🕒 Últimos Pedidos Registrados</h4>
@@ -331,17 +334,21 @@ if ($conn && isset($_POST['registrar_venta'])) {
                                 <?php
                                 try {
                                     $pedidos = $conn->query("SELECT * FROM pedidos ORDER BY id_pedido DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
-                                    foreach ($pedidos as $ped) {
-                                        echo "<tr>
-                                            <td><span class='badge bg-warning text-dark border-cartoon'>#{$ped['id_pedido']}</span></td>
-                                            <td class='text-start ps-4'>".htmlspecialchars($ped['cliente'])."</td>
-                                            <td class='text-success fs-6'>Bs. ".number_format($ped['total'], 2)."</td>
-                                            <td>{$ped['usuario_registro']}</td>
-                                            <td class='text-muted fs-7'>{$ped['fecha']}</td>
-                                        </tr>";
+                                    if (count($pedidos) > 0) {
+                                        foreach ($pedidos as $ped) {
+                                            echo "<tr>
+                                                <td><span class='badge bg-warning text-dark border-cartoon'>#{$ped['id_pedido']}</span></td>
+                                                <td class='text-start ps-4'>".htmlspecialchars($ped['cliente'])."</td>
+                                                <td class='text-success fs-6'>Bs. ".number_format($ped['total'], 2)."</td>
+                                                <td>{$ped['usuario_registro']}</td>
+                                                <td class='text-muted fs-7'>{$ped['fecha']}</td>
+                                            </tr>";
+                                        }
+                                    } else {
+                                        echo "<tr><td colspan='5' class='text-muted py-3'>No hay pedidos registrados aún.</td></tr>";
                                     }
                                 } catch (Exception $e) {
-                                    echo "<tr><td colspan='5' class='text-muted'>No hay pedidos registrados aún.</td></tr>";
+                                    echo "<tr><td colspan='5' class='text-muted py-3'>No hay pedidos registrados aún.</td></tr>";
                                 }
                                 ?>
                             </tbody>
@@ -361,7 +368,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const cantidadInput = document.getElementById('cantidad_input');
     const btnConfirmar = document.getElementById('btn_confirmar');
 
-    // Manejador de clics en las tarjetas del menú
     document.querySelectorAll('.menu-card').forEach(card => {
         card.addEventListener('click', function() {
             document.querySelectorAll('.menu-card').forEach(c => c.classList.remove('selected'));
@@ -378,15 +384,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Escuchar cambios en los inputs
     if (clienteInput && cantidadInput) {
         clienteInput.addEventListener('input', actualizarTicket);
         cantidadInput.addEventListener('input', actualizarTicket);
     }
 
     function actualizarTicket() {
-        const cliente = clienteInput.value.trim();
-        const cantidad = parseInt(cantidadInput.value) || 1;
+        const cliente = clienteInput ? clienteInput.value.trim() : '';
+        const cantidad = cantidadInput ? (parseInt(cantidadInput.value) || 1) : 1;
 
         if (cliente !== "") {
             document.getElementById('ticket_cliente').innerText = cliente;
@@ -403,7 +408,6 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('ticket_total').innerText = "Bs. " + total.toFixed(2);
         }
 
-        // Habilitar botón solo si hay cliente y producto seleccionado
         if (cliente !== "" && productoSeleccionado !== null && cantidad > 0) {
             btnConfirmar.disabled = false;
         } else {
